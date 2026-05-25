@@ -1,0 +1,15 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - us-central1-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/trainer:latest
+      - .
+images:
+  - us-central1-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/trainer:latest
+serviceAccount: projects/$PROJECT_ID/serviceAccounts/521832899282-compute@developer.gserviceaccount.com
+logsBucket: gs://${_LOGS_BUCKET}
+options:
+  machineType: E2_HIGHCPU_32
+  logging: GCS_ONLY
+timeout: 3600s

@@ -1,0 +1,44 @@
+# Conversion image: HF safetensors (Gemma 4 E2B, LoRA-merged) -> .litertlm
+# litert-torch Generative API export_hf is CPU-only, so this is a slim CPU image.
+# No CUDA base needed — conversion runs on n1-highmem CPU machine (skips A100 spot queue).
+FROM python:3.11-slim-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HUB_ENABLE_HF_TRANSFER=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl ca-certificates build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --upgrade pip wheel setuptools
+
+# litert-torch CLI (provides the `litert-torch export_hf` subcommand via `fire`).
+# Nightly is the actively-maintained channel for Gemma 4 support; it pulls
+# ai-edge-litert-nightly[model-utils], ai-edge-quantizer-nightly, litert-converter,
+# fire, transformers. tf-nightly is pulled transitively (CPU build).
+RUN pip install --pre litert-torch-nightly
+
+# litert-torch-nightly requires torch >= 2.11 (nightly): its export module does
+# `torch.export.Dim | None` at class-def time, which only works when Dim is a
+# TYPE (newer torch), not a function (2.7). Force CPU torch NIGHTLY last so it
+# wins over whatever litert-torch pulled. Conversion is CPU-only.
+RUN pip install --pre --upgrade torch \
+    --index-url https://download.pytorch.org/whl/nightly/cpu
+
+# Runtime helpers for GCS I/O + tokenizer handling.
+RUN pip install google-cloud-storage sentencepiece protobuf hf_transfer
+
+# Sanity: exercise the EXACT import that failed at runtime (export_hf pulls in
+# exportable_module_config with the `Dim | None` annotation) + confirm CPU torch.
+# Fail the BUILD not the JOB.
+RUN python -c "import torch; print('TORCH', torch.__version__); assert torch.version.cuda is None, ('expected CPU torch', torch.version.cuda)" && \
+    python -c "from litert_torch.generative.export_hf import export; print('export_hf import OK')"
+
+WORKDIR /workspace
+COPY convert.py /workspace/convert.py
+COPY convert_entrypoint.sh /workspace/convert_entrypoint.sh
+RUN chmod +x /workspace/convert_entrypoint.sh
+
+ENTRYPOINT ["/workspace/convert_entrypoint.sh"]
